@@ -1,0 +1,65 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    branches: [ "main" ]   # deploy only from main branch
+  pull_request:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. Run linting + SonarCloud analysis
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=myshoes-frontend
+            -Dsonar.organization=myorg
+            -Dsonar.sources=src
+
+      # 5. Build frontend
+      - name: Build project
+        run: npm run build
+
+      # 6. Sync build output to S3
+      - name: Upload to S3
+        uses: aws-actions/s3-sync@v2
+        with:
+          bucket: ${{ secrets.AWS_S3_BUCKET }}
+          region: ${{ secrets.AWS_REGION }}
+          source-dir: build
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      # 7. Invalidate CloudFront cache
+      - name: Invalidate CloudFront cache
+        uses: aws-actions/aws-cli@v2
+        with:
+          args: >
+            cloudfront create-invalidation
+            --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID }}
+            --paths "/*"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
